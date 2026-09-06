@@ -12,6 +12,7 @@
  * viewer for the envelope kind (FR-029, US2.3). This module NEVER throws.
  */
 
+import { apiUrl } from "../../lib/api/base-path";
 import type { PreviewerManifest } from "../../types/api";
 import {
   type PreviewHostApi,
@@ -48,6 +49,12 @@ export type LoadResult = LoadSuccess | LoadFailure;
  * `module_url` is a site-relative path. Absolute http(s)/protocol-relative/
  * data/blob URLs are rejected — no remote or inline code is ever imported
  * (FR-022, ADR-048 §4).
+ *
+ * ADR-055 Spec 0 (FR-005): prefix resolution goes through the shared
+ * base-path source of truth — the validator resolves the URL the loader will
+ * actually import (i.e. after `apiUrl` applies the configured mount prefix).
+ * Both the backend-relative form (`/api/...`) and the already-prefixed form
+ * are accepted; remote URLs are still rejected.
  */
 export function isSameOriginModuleUrl(moduleUrl: string): boolean {
   if (typeof moduleUrl !== "string" || moduleUrl.trim() === "") return false;
@@ -59,9 +66,9 @@ export function isSameOriginModuleUrl(moduleUrl: string): boolean {
   // Require a site-relative absolute path so it always resolves against the
   // app origin (the backend always emits `/api/previews/assets/...`).
   if (!url.startsWith("/")) return false;
-  // Defensive: confirm it resolves to the current origin.
+  // Defensive: confirm it resolves to the current origin, prefix applied.
   try {
-    const resolved = new URL(url, window.location.origin);
+    const resolved = new URL(apiUrl(url), window.location.origin);
     return resolved.origin === window.location.origin;
   } catch {
     return false;
@@ -86,12 +93,19 @@ const defaultImporter: ModuleImporter = (moduleUrl) =>
 function injectManifestCss(manifest: PreviewerManifest): void {
   for (const href of manifest.css ?? []) {
     if (!isSameOriginModuleUrl(href)) continue;
-    if (document.querySelector(`link[data-previewer="${manifest.previewer_id}"][href="${href}"]`)) {
+    // ADR-055 Spec 0: resolve through the base path so the stylesheet loads
+    // under a prefixed mount (apiUrl is idempotent for already-prefixed URLs).
+    const resolvedHref = apiUrl(href);
+    if (
+      document.querySelector(
+        `link[data-previewer="${manifest.previewer_id}"][href="${resolvedHref}"]`,
+      )
+    ) {
       continue;
     }
     const link = document.createElement("link");
     link.rel = "stylesheet";
-    link.href = href;
+    link.href = resolvedHref;
     link.dataset.previewer = manifest.previewer_id;
     document.head.appendChild(link);
   }
@@ -129,7 +143,9 @@ export async function mountDynamicPreviewer(
 
   let mod: Record<string, unknown>;
   try {
-    mod = await importer(manifest.module_url);
+    // ADR-055 Spec 0: the manifest emits a backend-relative URL; import the
+    // prefixed form so the module resolves under a mounted prefix.
+    mod = await importer(apiUrl(manifest.module_url));
   } catch (err) {
     return {
       ok: false,

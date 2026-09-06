@@ -30,6 +30,7 @@ import type {
   PreviewerListResponse,
   PreviewerReloadResponse,
 } from "../../types/api";
+import { apiUrl } from "./base-path";
 import { JSON_HEADERS, apiFetch } from "./core";
 
 /**
@@ -61,10 +62,12 @@ export function plotTargetFromRunResponse(result: PlotRunResponse): PreviewTarge
 
 /** Build the same-origin URL for a validated previewer asset
  *  (`GET /api/previews/assets/{previewer_id}/{asset_path}`). This is the ONLY
- *  origin a dynamic previewer module is permitted to load from (FR-022). */
+ *  origin a dynamic previewer module is permitted to load from (FR-022).
+ *  ADR-055 Spec 0: the URL carries the configured mount prefix (apiUrl is
+ *  idempotent under the default root mount). */
 export function buildPreviewAssetUrl(previewerId: string, assetPath: string): string {
   const cleaned = assetPath.replace(/^\/+/, "");
-  return `/api/previews/assets/${encodeURIComponent(previewerId)}/${cleaned}`;
+  return apiUrl(`/api/previews/assets/${encodeURIComponent(previewerId)}/${cleaned}`);
 }
 
 export const dataApi = {

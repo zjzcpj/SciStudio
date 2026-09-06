@@ -19,6 +19,7 @@
  * move together.
  */
 
+import { apiUrl } from "./base-path";
 import { ApiError, apiFetch, JSON_HEADERS } from "./core";
 
 /** §6.1.6 — the four discovery sources a tutorial can come from. */
@@ -439,12 +440,14 @@ export interface TutorialAssetKey {
   id: string;
 }
 
-/** The URL of one reading page, named without its extension. */
+/** The URL of one reading page, named without its extension.
+ *  ADR-055 Spec 0: carries the configured mount prefix via apiUrl (a no-op
+ *  under the default root mount). */
 export function tutorialPageUrl(key: TutorialAssetKey, page: string): string {
   const kind = encodeURIComponent(key.source_kind);
   const source = encodeURIComponent(key.source_id);
   const tutorial = encodeURIComponent(key.id);
-  return `/api/tutorials/${kind}/${source}/${tutorial}/pages/${encodeURIComponent(page)}`;
+  return apiUrl(`/api/tutorials/${kind}/${source}/${tutorial}/pages/${encodeURIComponent(page)}`);
 }
 
 /**

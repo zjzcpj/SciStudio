@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { apiUrl } from "../lib/api/base-path";
 import type { LogEntry } from "../types/api";
 import { useAppStore } from "../store";
 import {
@@ -59,7 +60,9 @@ export function useLogStream(workflowId: string | null, blockId: string | null):
 
     function connect() {
       if (cancelled) return;
-      source = new EventSource(`/api/logs/stream?${params.toString()}`);
+      // ADR-055 Spec 0 (FR-004/FR-005): EventSource has no apiFetch
+      // equivalent, so the URL goes through the base-path source of truth.
+      source = new EventSource(apiUrl(`/api/logs/stream?${params.toString()}`));
       source.onopen = () => {
         if (cancelled) return;
         delay = RECONNECT_INITIAL_DELAY_MS;

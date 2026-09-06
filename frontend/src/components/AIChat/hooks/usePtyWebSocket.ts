@@ -25,6 +25,7 @@
  */
 import { useCallback, useEffect, useRef } from "react";
 
+import { wsUrl } from "../../../lib/api/base-path";
 import type { TerminalProvider } from "../../../store/types";
 
 export type PtyClientFrame =
@@ -79,15 +80,6 @@ export function buildPtyUrl({
   rows?: number | null;
   baseOrigin?: string;
 }): string {
-  // Derive ws:// or wss:// from window.location.protocol; in tests fall back
-  // to ws://localhost. baseOrigin override is for unit tests.
-  let origin = baseOrigin;
-  if (!origin && typeof window !== "undefined" && window.location) {
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    origin = `${proto}//${window.location.host}`;
-  }
-  if (!origin) origin = "ws://localhost";
-
   const params = new URLSearchParams({
     project_dir: projectDir,
     provider,
@@ -99,7 +91,12 @@ export function buildPtyUrl({
   if (Number.isFinite(rows) && rows && rows > 0) {
     params.set("rows", String(Math.trunc(rows)));
   }
-  return `${origin}/api/ai/pty/${encodeURIComponent(tabId)}?${params.toString()}`;
+  const path = `/api/ai/pty/${encodeURIComponent(tabId)}?${params.toString()}`;
+  // baseOrigin override is for unit tests; it is already a complete base, so
+  // the path is appended verbatim there. Production goes through wsUrl so
+  // the configured mount prefix rides along (ADR-055 Spec 0, FR-005).
+  if (baseOrigin) return `${baseOrigin}${path}`;
+  return wsUrl(path);
 }
 
 /**

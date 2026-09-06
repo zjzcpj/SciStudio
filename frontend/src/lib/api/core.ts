@@ -10,6 +10,7 @@
  */
 
 import { logger } from "../logger";
+import { apiUrl } from "./base-path";
 
 export const JSON_HEADERS = {
   "Content-Type": "application/json",
@@ -70,6 +71,10 @@ export interface ApiFetchOptions extends RequestInit {
 }
 
 export async function apiFetch<T>(path: string, init?: ApiFetchOptions): Promise<T> {
+  // ADR-055 Spec 0 (FR-004): every API call goes through the single
+  // base-path source of truth so a prefixed mount (e.g. a Hub user route)
+  // needs no per-call-site handling. Idempotent under the default root mount.
+  const url = apiUrl(path);
   // #1741: attach a correlation id (X-Request-ID) and emit DEBUG at the API
   // boundary so every call is traceable across frontend -> backend logs.
   const requestId = newRequestId();
@@ -77,7 +82,7 @@ export async function apiFetch<T>(path: string, init?: ApiFetchOptions): Promise
   headers.set("X-Request-ID", requestId);
   const method = init?.method ?? "GET";
   const started = typeof performance !== "undefined" ? performance.now() : 0;
-  logger.debug(`→ ${method} ${path}`, { request_id: requestId });
+  logger.debug(`→ ${method} ${url}`, { request_id: requestId });
 
   // #2019: an AbortController rather than a bare Promise.race, so a timed-out
   // request actually releases the connection instead of running on unobserved.
@@ -99,7 +104,7 @@ export async function apiFetch<T>(path: string, init?: ApiFetchOptions): Promise
 
   let response: Response;
   try {
-    response = await fetch(path, {
+    response = await fetch(url, {
       ...requestInit,
       headers,
       ...(controller !== null ? { signal: controller.signal } : {}),
@@ -108,10 +113,10 @@ export async function apiFetch<T>(path: string, init?: ApiFetchOptions): Promise
     // Our own deadline tripped — report it as such rather than as a generic
     // network fault, so the banner says "timed out" instead of "aborted".
     if (timeoutMs !== undefined && controller?.signal.aborted && !requestInit.signal?.aborted) {
-      logger.error(`timeout: ${method} ${path} after ${timeoutMs}ms`, { request_id: requestId });
+      logger.error(`timeout: ${method} ${url} after ${timeoutMs}ms`, { request_id: requestId });
       throw new ApiTimeoutError(path, timeoutMs);
     }
-    logger.error(`network error: ${method} ${path}`, {
+    logger.error(`network error: ${method} ${url}`, {
       request_id: requestId,
       error: String(error),
     });
@@ -147,11 +152,11 @@ export async function apiFetch<T>(path: string, init?: ApiFetchOptions): Promise
     if (response.status >= 500 && !message.includes(String(response.status))) {
       message = `${message} (HTTP ${response.status})`;
     }
-    logger.warn(`${method} ${path} ${response.status} ${elapsedMs}ms`, { request_id: requestId });
+    logger.warn(`${method} ${url} ${response.status} ${elapsedMs}ms`, { request_id: requestId });
     throw new ApiError(message, response.status);
   }
 
-  logger.debug(`← ${method} ${path} ${response.status} ${elapsedMs}ms`, { request_id: requestId });
+  logger.debug(`← ${method} ${url} ${response.status} ${elapsedMs}ms`, { request_id: requestId });
   if (response.status === 204) {
     return undefined as T;
   }

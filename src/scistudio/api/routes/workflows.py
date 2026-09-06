@@ -102,8 +102,29 @@ def _workflow_session_error(exc: RuntimeError) -> HTTPException:
 
 
 def _bind_engine_api_url(request: Request) -> None:
-    """Publish this API process URL so worker subprocesses can call back."""
-    os.environ["SCISTUDIO_ENGINE_API_URL"] = str(request.base_url).rstrip("/")
+    """Publish this API process URL so worker subprocesses can call back.
+
+    ADR-055 Spec 0 (FR-006): the URL is derived from the CONFIGURED external
+    base — the ``SCISTUDIO_ENGINE_API_URL`` the CLI (``serve``/``gui``)
+    exports at startup — with the app's configured mount prefix
+    (``app.state.root_path``) appended exactly once. Workers are subprocesses
+    on this host, so the startup-time base stays reachable under a prefix
+    while the triggering request's ``base_url`` (whose scheme/host may be
+    proxy-facing or simply lack the prefix) is never trusted.
+
+    Documented fallback for the unprefixed local case: when no external base
+    was configured (direct ``uvicorn scistudio.api.app:create_app`` runs),
+    derive from the incoming request and append the configured prefix the
+    same way. The endswith guard keeps repeated execute calls idempotent.
+    """
+    root_path = getattr(request.app.state, "root_path", "") or ""
+    base = os.environ.get("SCISTUDIO_ENGINE_API_URL", "").strip().rstrip("/")
+    if not base:
+        # Fallback: unprefixed local case — no external base configured.
+        base = str(request.base_url).rstrip("/")
+    if root_path and not base.endswith(root_path):
+        base = f"{base}{root_path}"
+    os.environ["SCISTUDIO_ENGINE_API_URL"] = base
 
 
 def _request_source_id(request: Request, body: Any | None = None) -> str | None:

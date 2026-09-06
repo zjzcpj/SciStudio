@@ -12,6 +12,8 @@
  */
 import { useCallback, useEffect, useRef } from "react";
 
+import { apiFetch, JSON_HEADERS } from "../../lib/api/core";
+
 interface LintDiagnostic {
   line: number;
   column: number;
@@ -93,17 +95,16 @@ export function useLintMarkers({ filePath, editorRef, monacoRef }: UseLintMarker
     async (content: string) => {
       const requestId = ++lintRequestIdRef.current;
       try {
-        const response = await fetch("/api/lint/python", {
+        // apiFetch routes through the base-path helper (ADR-055 Spec 0 FR-004)
+        // and throws on non-2xx; lint failures are silently ignored below.
+        const payload = await apiFetch<LintResponse>("/api/lint/python", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: JSON_HEADERS,
           body: JSON.stringify({ content, filename: filePath }),
         });
-        if (!response.ok) return;
         // #871: drop the response if a newer lint request has fired while we
         // awaited. Without this guard, a slow response can repaint stale
         // diagnostics over the latest ones.
-        if (requestId !== lintRequestIdRef.current) return;
-        const payload = (await response.json()) as LintResponse;
         if (requestId !== lintRequestIdRef.current) return;
         applyMarkers(payload.diagnostics ?? []);
       } catch {

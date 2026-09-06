@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { wsUrl } from "../lib/api/base-path";
 import { useAppStore } from "../store";
 import type { WorkflowEventMessage } from "../types/api";
 import {
@@ -68,8 +69,9 @@ export function useWorkflowWebSocket(enabled: boolean): WorkflowWebSocketState {
     let delay = RECONNECT_INITIAL_DELAY_MS;
     let lastInboundAt = 0;
 
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const url = `${protocol}://${window.location.host}/ws`;
+    // ADR-055 Spec 0 (FR-005): the WS URL comes from the single base-path
+    // source of truth so a prefixed mount dials `<prefix>/ws`.
+    const url = wsUrl("/ws");
 
     const clearHeartbeat = () => {
       if (heartbeatTimer) {

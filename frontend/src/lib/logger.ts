@@ -13,6 +13,8 @@
  * here too, so the frontend is no longer an observability black hole.
  */
 
+import { apiUrl } from "./api/base-path";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface ClientLogRecord {
@@ -58,7 +60,9 @@ async function flush(): Promise<void> {
   const batch = pending.slice(0, MAX_BATCH);
   pending = pending.slice(MAX_BATCH);
   try {
-    await fetch("/api/client-logs", {
+    // ADR-055 Spec 0 (FR-004): raw fetch (apiFetch would be a circular
+    // import), but the URL still goes through the base-path source of truth.
+    await fetch(apiUrl("/api/client-logs"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ records: batch }),
@@ -172,7 +176,7 @@ async function openNativeSaveDialog(
   defaultFilename: string,
 ): Promise<{ path: string | null; available: boolean }> {
   try {
-    const response = await fetch("/api/filesystem/native-dialog", {
+    const response = await fetch(apiUrl("/api/filesystem/native-dialog"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // prefer_home: a diagnostic bundle is a machine artifact, not a project
@@ -194,7 +198,7 @@ async function openNativeSaveDialog(
 /** Browser-download fallback: stream the bundle blob (or a plain `.log`). */
 async function downloadBundleViaBrowser(records: ClientLogRecord[]): Promise<void> {
   try {
-    const response = await fetch("/api/diagnostics/bundle", {
+    const response = await fetch(apiUrl("/api/diagnostics/bundle"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ records }),
@@ -232,7 +236,7 @@ export async function exportDiagnosticBundle(): Promise<void> {
   const dialog = await openNativeSaveDialog("scistudio-diagnostics.zip");
   if (dialog.path) {
     try {
-      const response = await fetch("/api/diagnostics/bundle", {
+      const response = await fetch(apiUrl("/api/diagnostics/bundle"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ records, path: dialog.path }),

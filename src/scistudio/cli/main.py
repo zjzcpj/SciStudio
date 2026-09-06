@@ -387,7 +387,16 @@ def init_block_package(
 
 
 @app.command()
-def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
+def serve(
+    host: str = typer.Option("0.0.0.0", envvar="SCISTUDIO_HOST", help="Interface to bind."),
+    port: int = typer.Option(8000, help="Port to bind."),
+    root_path: str = typer.Option(
+        "",
+        "--root-path",
+        envvar="SCISTUDIO_ROOT_PATH",
+        help="Mount prefix the app is served under (e.g. /user/alice/scistudio). Default: root mount.",
+    ),
+) -> None:
     """Start the FastAPI server."""
     import os
 
@@ -398,10 +407,47 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
     # #1741: console + persistent file logging; log_config=None lets uvicorn's
     # access/error loggers propagate to the root handlers (so they hit the file).
     configure_logging(os.environ.get("SCISTUDIO_LOG_LEVEL", "INFO").upper())
-    typer.echo(f"Starting SciStudio server on {host}:{port}...")
-    # ADR-035 §3.10: see comment in `gui` for why this is needed.
-    os.environ.setdefault("SCISTUDIO_ENGINE_API_URL", f"http://127.0.0.1:{port}")
+    # ADR-055 Spec 0 (FR-001/FR-007): normalize once here and mirror the value
+    # into the environment; create_app applies it as the FastAPI root_path.
+    root_path = _normalize_root_path_or_exit(root_path)
+    os.environ["SCISTUDIO_ROOT_PATH"] = root_path
+    typer.echo(f"Starting SciStudio server on {host}:{port}{root_path}...")
+    # ADR-035 §3.10: see comment in `gui` for why this is needed. The mount
+    # prefix rides along so worker callbacks resolve under it (FR-006), and
+    # the callback host follows the bind host (a specific non-loopback bind
+    # does not listen on 127.0.0.1 — Codex review on PR #2274).
+    os.environ.setdefault("SCISTUDIO_ENGINE_API_URL", f"http://{_worker_callback_host(host)}:{port}{root_path}")
+    # The prefix is deliberately NOT passed as uvicorn's own root_path: modern
+    # uvicorn *prepends* its root_path onto every incoming path (built for
+    # proxies that strip the prefix), while ADR-055's proxy contract forwards
+    # the prefix verbatim. FastAPI's app-level root_path (set from the env var
+    # in create_app) is the verbatim-proxy-correct mechanism (FR-001).
     uvicorn.run("scistudio.api.app:create_app", host=host, port=port, factory=True, log_config=None)
+
+
+def _worker_callback_host(bind_host: str) -> str:
+    """Host that worker subprocesses should call back on (ADR-035 §3.10).
+
+    Workers run on the same machine. A wildcard bind (``0.0.0.0``/``::``) or
+    an explicit loopback bind is reachable via ``127.0.0.1``; a specific
+    non-loopback bind does NOT listen on loopback, so the callback must
+    advertise the bind host itself (Codex review on PR #2274).
+    """
+    if bind_host in ("0.0.0.0", "::"):
+        return "127.0.0.1"
+    return bind_host
+
+
+def _normalize_root_path_or_exit(raw: str) -> str:
+    """Normalize the CLI mount prefix; exit 2 with a clear error on a
+    reserved-namespace collision (see app.normalize_root_path)."""
+    from scistudio.api.app import normalize_root_path
+
+    try:
+        return normalize_root_path(raw)
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=2) from None
 
 
 def _ephemeral_port(host: str) -> int:
@@ -417,6 +463,18 @@ def gui(
     port: int = typer.Option(8000, help="Port for the API server"),
     no_browser: bool = typer.Option(False, "--no-browser", help="Do not open browser automatically"),
     bundled: bool = typer.Option(False, "--bundled", help="Run in desktop bundled mode"),
+    host: str = typer.Option(
+        "",
+        "--host",
+        envvar="SCISTUDIO_HOST",
+        help="Interface to bind. Default: 127.0.0.1 in bundled mode, 0.0.0.0 otherwise.",
+    ),
+    root_path: str = typer.Option(
+        "",
+        "--root-path",
+        envvar="SCISTUDIO_ROOT_PATH",
+        help="Mount prefix the app is served under (e.g. /user/alice/scistudio). Default: root mount.",
+    ),
 ) -> None:
     """Launch SciStudio GUI in your default browser."""
     import json
@@ -436,10 +494,15 @@ def gui(
     if log_file is not None and not bundled:
         typer.echo(f"Logging to {log_file}")
 
-    server_host = "127.0.0.1" if bundled else "0.0.0.0"
-    public_host = "127.0.0.1" if bundled else "localhost"
+    # ADR-055 Spec 0 (FR-001/FR-007): normalize once here and mirror the value
+    # into the environment; create_app applies it as the FastAPI root_path.
+    root_path = _normalize_root_path_or_exit(root_path)
+    os.environ["SCISTUDIO_ROOT_PATH"] = root_path
+
+    server_host = host or ("127.0.0.1" if bundled else "0.0.0.0")
+    public_host = host if host and host not in ("0.0.0.0", "::") else ("127.0.0.1" if bundled else "localhost")
     bound_port = _ephemeral_port(public_host) if port == 0 else port
-    url = f"http://{public_host}:{bound_port}"
+    url = f"http://{public_host}:{bound_port}{root_path}"
     if bundled:
         os.environ.setdefault("SCISTUDIO_BUNDLED", "1")
         typer.echo(
@@ -458,8 +521,14 @@ def gui(
     # ADR-035 §3.10: workers spawned by the engine call back via this URL to
     # request PTY tabs. The engine alone knows the bound port at startup, so
     # export it here before uvicorn forks any worker. Companion to
-    # SCISTUDIO_ENGINE_IPC_TOKEN (set in api.app:lifespan).
-    os.environ.setdefault("SCISTUDIO_ENGINE_API_URL", f"http://127.0.0.1:{bound_port}")
+    # SCISTUDIO_ENGINE_IPC_TOKEN (set in api.app:lifespan). ADR-055 Spec 0:
+    # the mount prefix rides along so callbacks resolve under it (FR-006), and
+    # the callback host follows the bind host (a specific non-loopback bind
+    # does not listen on 127.0.0.1 — Codex review on PR #2274).
+    os.environ.setdefault(
+        "SCISTUDIO_ENGINE_API_URL",
+        f"http://{_worker_callback_host(server_host)}:{bound_port}{root_path}",
+    )
     if not no_browser and not bundled:
         threading.Timer(1.5, webbrowser.open, args=[url]).start()
     # #1865: in bundled desktop mode, self-reap if the Electron parent dies
@@ -470,6 +539,11 @@ def gui(
 
         start_parent_death_watchdog(os.getppid())
     # #1741: log_config=None lets uvicorn loggers propagate to our root handlers.
+    # The prefix is deliberately NOT passed as uvicorn's own root_path: modern
+    # uvicorn *prepends* its root_path onto every incoming path (built for
+    # proxies that strip the prefix), while ADR-055's proxy contract forwards
+    # the prefix verbatim. FastAPI's app-level root_path (set from the env var
+    # in create_app) is the verbatim-proxy-correct mechanism (FR-001).
     uvicorn.run(
         "scistudio.api.app:create_app",
         host=server_host,
