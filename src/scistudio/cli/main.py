@@ -402,7 +402,6 @@ def serve(
 
     import uvicorn
 
-    from scistudio.api.app import normalize_root_path
     from scistudio.utils.logging import configure_logging
 
     # #1741: console + persistent file logging; log_config=None lets uvicorn's
@@ -410,18 +409,45 @@ def serve(
     configure_logging(os.environ.get("SCISTUDIO_LOG_LEVEL", "INFO").upper())
     # ADR-055 Spec 0 (FR-001/FR-007): normalize once here and mirror the value
     # into the environment; create_app applies it as the FastAPI root_path.
-    root_path = normalize_root_path(root_path)
+    root_path = _normalize_root_path_or_exit(root_path)
     os.environ["SCISTUDIO_ROOT_PATH"] = root_path
     typer.echo(f"Starting SciStudio server on {host}:{port}{root_path}...")
     # ADR-035 §3.10: see comment in `gui` for why this is needed. The mount
-    # prefix rides along so worker callbacks resolve under it (FR-006).
-    os.environ.setdefault("SCISTUDIO_ENGINE_API_URL", f"http://127.0.0.1:{port}{root_path}")
+    # prefix rides along so worker callbacks resolve under it (FR-006), and
+    # the callback host follows the bind host (a specific non-loopback bind
+    # does not listen on 127.0.0.1 — Codex review on PR #2274).
+    os.environ.setdefault("SCISTUDIO_ENGINE_API_URL", f"http://{_worker_callback_host(host)}:{port}{root_path}")
     # The prefix is deliberately NOT passed as uvicorn's own root_path: modern
     # uvicorn *prepends* its root_path onto every incoming path (built for
     # proxies that strip the prefix), while ADR-055's proxy contract forwards
     # the prefix verbatim. FastAPI's app-level root_path (set from the env var
     # in create_app) is the verbatim-proxy-correct mechanism (FR-001).
     uvicorn.run("scistudio.api.app:create_app", host=host, port=port, factory=True, log_config=None)
+
+
+def _worker_callback_host(bind_host: str) -> str:
+    """Host that worker subprocesses should call back on (ADR-035 §3.10).
+
+    Workers run on the same machine. A wildcard bind (``0.0.0.0``/``::``) or
+    an explicit loopback bind is reachable via ``127.0.0.1``; a specific
+    non-loopback bind does NOT listen on loopback, so the callback must
+    advertise the bind host itself (Codex review on PR #2274).
+    """
+    if bind_host in ("0.0.0.0", "::"):
+        return "127.0.0.1"
+    return bind_host
+
+
+def _normalize_root_path_or_exit(raw: str) -> str:
+    """Normalize the CLI mount prefix; exit 2 with a clear error on a
+    reserved-namespace collision (see app.normalize_root_path)."""
+    from scistudio.api.app import normalize_root_path
+
+    try:
+        return normalize_root_path(raw)
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=2) from None
 
 
 def _ephemeral_port(host: str) -> int:
@@ -458,7 +484,6 @@ def gui(
 
     import uvicorn
 
-    from scistudio.api.app import normalize_root_path
     from scistudio.utils.logging import configure_logging
 
     # #1741: console + persistent JSON-line file logging (replaces bare
@@ -471,7 +496,7 @@ def gui(
 
     # ADR-055 Spec 0 (FR-001/FR-007): normalize once here and mirror the value
     # into the environment; create_app applies it as the FastAPI root_path.
-    root_path = normalize_root_path(root_path)
+    root_path = _normalize_root_path_or_exit(root_path)
     os.environ["SCISTUDIO_ROOT_PATH"] = root_path
 
     server_host = host or ("127.0.0.1" if bundled else "0.0.0.0")
@@ -497,8 +522,13 @@ def gui(
     # request PTY tabs. The engine alone knows the bound port at startup, so
     # export it here before uvicorn forks any worker. Companion to
     # SCISTUDIO_ENGINE_IPC_TOKEN (set in api.app:lifespan). ADR-055 Spec 0:
-    # the mount prefix rides along so callbacks resolve under it (FR-006).
-    os.environ.setdefault("SCISTUDIO_ENGINE_API_URL", f"http://127.0.0.1:{bound_port}{root_path}")
+    # the mount prefix rides along so callbacks resolve under it (FR-006), and
+    # the callback host follows the bind host (a specific non-loopback bind
+    # does not listen on 127.0.0.1 — Codex review on PR #2274).
+    os.environ.setdefault(
+        "SCISTUDIO_ENGINE_API_URL",
+        f"http://{_worker_callback_host(server_host)}:{bound_port}{root_path}",
+    )
     if not no_browser and not bundled:
         threading.Timer(1.5, webbrowser.open, args=[url]).start()
     # #1865: in bundled desktop mode, self-reap if the Electron parent dies

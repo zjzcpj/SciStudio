@@ -17,6 +17,7 @@ Covers the spec's verification plan (§4.4):
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -112,6 +113,15 @@ def test_normalize_root_path(raw: str | None, expected: str) -> None:
     assert normalize_root_path(raw) == expected
 
 
+@pytest.mark.parametrize("raw", ["/api", "/api/", "api", "/ws", "/ws/terminal", "/api/v2"])
+def test_normalize_root_path_rejects_reserved_namespaces(raw: str) -> None:
+    """Codex review (PR #2274): a prefix whose first segment collides with the
+    /api or /ws route namespaces makes "already prefixed?" undecidable in the
+    frontend helper, so it is rejected at configuration time."""
+    with pytest.raises(ValueError, match="reserved"):
+        normalize_root_path(raw)
+
+
 # ---------------------------------------------------------------------------
 # FR-002: default empty prefix is a strict no-op
 # ---------------------------------------------------------------------------
@@ -132,6 +142,7 @@ def test_empty_prefix_is_a_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         assert shell.status_code == 200
         assert shell.text == expected_html
         assert "__SCISTUDIO_BASE_PATH__" not in shell.text
+        assert "<base" not in shell.text
         assert client.get("/api/version").status_code == 200
 
 
@@ -152,6 +163,29 @@ def test_prefixed_spa_shell_carries_injected_base_path(prefixed_client: TestClie
     assert f'window.__SCISTUDIO_BASE_PATH__ = "{PREFIX}";' in response.text
 
 
+def test_prefixed_spa_shell_has_prefix_rooted_base_href(prefixed_client: TestClient) -> None:
+    """Codex review (PR #2274): Vite builds with ``base: "./"``, so without a
+    prefix-rooted <base> element the shell's relative asset references would
+    resolve against the *document* URL. The <base> must precede the first
+    relative asset reference."""
+    body = prefixed_client.get(f"{PREFIX}/").text
+    base_tag = f'<base href="{PREFIX}/">'
+    assert base_tag in body
+    assert body.index(base_tag) < body.index('src="./assets/')
+
+
+def test_deep_spa_route_resolves_assets_from_prefix_root(prefixed_client: TestClient) -> None:
+    """At a deep route the browser resolves `./assets/main.js` against the
+    injected <base>, i.e. to `<prefix>/assets/main.js` — which must serve the
+    real file (not the SPA fallback)."""
+    body = prefixed_client.get(f"{PREFIX}/projects/some/deep/route").text
+    assert f'<base href="{PREFIX}/">' in body
+    asset = prefixed_client.get(f"{PREFIX}/assets/main.js")
+    assert asset.status_code == 200
+    assert asset.headers["content-type"].startswith(("text/javascript", "application/javascript"))
+    assert asset.text == "console.log('hi')"
+
+
 def test_prefixed_spa_deep_route_also_carries_base_path(prefixed_client: TestClient) -> None:
     """SPA fallback (client-side route) must inject the bootstrap too."""
     response = prefixed_client.get(f"{PREFIX}/projects/some/deep/route")
@@ -169,13 +203,16 @@ def test_hashed_assets_stay_byte_identical_under_prefix(prefixed_client: TestCli
 
 def test_prefixed_shell_has_no_unprefixed_root_relative_references(prefixed_client: TestClient) -> None:
     """FR-009: the served SPA shell must not contain an unprefixed absolute
-    path the proxy did not rewrite (root-absolute src/href, "/api/, "/ws)."""
+    path the proxy did not rewrite (root-absolute src/href, "/api/, "/ws).
+    The injected <base href> IS root-absolute but prefix-rooted — that is the
+    mechanism, not a violation."""
     body = prefixed_client.get(f"{PREFIX}/").text
     assert 'src="/' not in body
-    assert 'href="/' not in body
     assert '"/api/' not in body
     assert "'/api/" not in body
     assert '"/ws' not in body
+    for href in re.findall(r'href="([^"]*)"', body):
+        assert not href.startswith("/") or href.startswith(f"{PREFIX}/"), href
 
 
 def test_bare_prefix_redirects_to_trailing_slash_with_prefix(prefixed_client: TestClient) -> None:
@@ -211,6 +248,28 @@ def test_prefixed_websocket_handshake_succeeds(prefixed_client: TestClient) -> N
     usable (the endpoint subscribes the bus on accept)."""
     with prefixed_client.websocket_connect(f"{PREFIX}/ws") as websocket:
         websocket.send_text('{"type": "ping"}')
+
+
+# ---------------------------------------------------------------------------
+# Spec edge cases: doubled separators / trailing-slash normalization
+# ---------------------------------------------------------------------------
+
+
+def test_doubled_separator_after_prefix_is_normalized(prefixed_client: TestClient) -> None:
+    """Codex review (PR #2274): ``/p//api/version`` must behave exactly like
+    ``/p/api/version`` — the guard collapses doubled separators before
+    routing, so this is 200, not a spurious 404."""
+    assert prefixed_client.get(f"{PREFIX}//api/version").status_code == 200
+
+
+def test_doubled_separator_on_deep_spa_route_is_normalized(prefixed_client: TestClient) -> None:
+    response = prefixed_client.get(f"{PREFIX}//projects/foo")
+    assert response.status_code == 200
+    assert f'window.__SCISTUDIO_BASE_PATH__ = "{PREFIX}";' in response.text
+
+
+def test_prefix_with_trailing_slash_serves_shell(prefixed_client: TestClient) -> None:
+    assert prefixed_client.get(f"{PREFIX}/").status_code == 200
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +440,34 @@ class TestServeRootPath:
         assert result.exit_code == 0
         assert calls["host"] == "127.0.0.1"
 
+    def test_serve_reserved_prefix_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Codex review (PR #2274): /api and /ws collide with the route
+        namespaces and must be refused with a clear error, not served."""
+        monkeypatch.setattr("uvicorn.run", _fake_uvicorn_run({}))
+        result = runner.invoke(cli_app, ["serve", "--root-path", "/api"])
+        assert result.exit_code == 2
+        assert "reserved" in result.output
+
+    @pytest.mark.parametrize(
+        ("bind_host", "expected_callback_host"),
+        [
+            ("0.0.0.0", "127.0.0.1"),  # wildcard: reachable via loopback
+            ("::", "127.0.0.1"),  # v6 wildcard: same
+            ("127.0.0.1", "127.0.0.1"),  # explicit loopback
+            ("192.168.1.5", "192.168.1.5"),  # specific bind: loopback would be dead
+        ],
+    )
+    def test_serve_worker_callback_host_follows_bind(
+        self, monkeypatch: pytest.MonkeyPatch, bind_host: str, expected_callback_host: str
+    ) -> None:
+        """Codex review (PR #2274): workers must be able to reach the API;
+        when uvicorn binds a specific interface, 127.0.0.1 is not one."""
+        monkeypatch.setattr("uvicorn.run", _fake_uvicorn_run({}))
+        monkeypatch.delenv("SCISTUDIO_ENGINE_API_URL", raising=False)
+        result = runner.invoke(cli_app, ["serve", "--host", bind_host])
+        assert result.exit_code == 0
+        assert os.environ["SCISTUDIO_ENGINE_API_URL"] == f"http://{expected_callback_host}:8000"
+
 
 class TestGuiRootPath:
     def test_gui_help_exits_cleanly(self) -> None:
@@ -423,3 +510,24 @@ class TestGuiRootPath:
         assert result.exit_code == 0
         assert '"url":"http://127.0.0.1:' in result.output
         assert '/p"' in result.output
+
+    def test_gui_reserved_prefix_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("uvicorn.run", _fake_uvicorn_run({}))
+        result = runner.invoke(cli_app, ["gui", "--no-browser", "--root-path", "/ws"])
+        assert result.exit_code == 2
+        assert "reserved" in result.output
+
+    def test_gui_worker_callback_host_follows_bind(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Codex review (PR #2274): same callback-host rule as serve."""
+        monkeypatch.setattr("uvicorn.run", _fake_uvicorn_run({}))
+        monkeypatch.delenv("SCISTUDIO_ENGINE_API_URL", raising=False)
+        result = runner.invoke(cli_app, ["gui", "--no-browser", "--host", "10.0.0.2"])
+        assert result.exit_code == 0
+        assert os.environ["SCISTUDIO_ENGINE_API_URL"] == "http://10.0.0.2:8000"
+
+    def test_gui_wildcard_bind_keeps_loopback_callback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("uvicorn.run", _fake_uvicorn_run({}))
+        monkeypatch.delenv("SCISTUDIO_ENGINE_API_URL", raising=False)
+        result = runner.invoke(cli_app, ["gui", "--no-browser"])
+        assert result.exit_code == 0
+        assert os.environ["SCISTUDIO_ENGINE_API_URL"] == "http://127.0.0.1:8000"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -228,6 +229,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             pass
 
 
+# First path segments that can never lead a mount prefix: the /api and /ws
+# route namespaces live there, so a colliding prefix (e.g. "/api") would make
+# "is this path already prefixed?" unanswerable downstream (Codex review on
+# PR #2274). Rejected at configuration time — the one place the prefix
+# enters the system (FR-008's single normalization point).
+RESERVED_ROOT_PATH_SEGMENTS = ("api", "ws")
+
+
 def normalize_root_path(raw: str | None) -> str:
     """Normalize a configured mount prefix (ADR-055 Spec 0, FR-008).
 
@@ -237,8 +246,19 @@ def normalize_root_path(raw: str | None) -> str:
     trailing slash, no doubled separators — so ``/prefix``, ``/prefix/`` and
     ``//prefix`` cannot diverge. Call sites MUST NOT concatenate prefixes by
     hand; they read the normalized value from ``app.state.root_path``.
+
+    Raises :class:`ValueError` when the first segment collides with the
+    reserved ``/api`` or ``/ws`` route namespaces (see
+    ``RESERVED_ROOT_PATH_SEGMENTS``).
     """
     segments = [segment for segment in (raw or "").strip().split("/") if segment]
+    if segments and segments[0] in RESERVED_ROOT_PATH_SEGMENTS:
+        raise ValueError(
+            f"Invalid root path {raw!r}: the first segment {segments[0]!r} is reserved "
+            f"({', '.join('/' + s for s in RESERVED_ROOT_PATH_SEGMENTS)} are the API and WebSocket "
+            "route namespaces). Choose a prefix that does not collide, "
+            "e.g. /user/<name>/scistudio."
+        )
     return f"/{'/'.join(segments)}" if segments else ""
 
 
@@ -265,6 +285,17 @@ class _RootPathGuardMiddleware:
             await self.app(scope, receive, send)
             return
         path = scope.get("path", "")
+        # Normalize doubled separators here — the single normalization point
+        # on the request side (spec §2 edge cases: ``/p//api/...`` must not
+        # diverge from ``/p/api/...``). Without this, Starlette strips the
+        # prefix and then fails to match ``//api/...`` → a spurious 404.
+        collapsed = re.sub(r"/{2,}", "/", path)
+        if collapsed != path:
+            scope = dict(scope)
+            scope["path"] = collapsed
+            if "raw_path" in scope:
+                scope["raw_path"] = collapsed.encode("ascii", "replace")
+            path = collapsed
         if path == self.root_path or path.startswith(f"{self.root_path}/"):
             await self.app(scope, receive, send)
             return

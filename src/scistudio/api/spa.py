@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from html import escape
 from pathlib import Path
 from typing import cast
 
@@ -77,15 +78,29 @@ class SPAStaticFiles(StaticFiles):
 def _templated_index_response(index_path: str, base_path: str) -> Response:
     """Serve ``index.html`` with the mount prefix injected as a bootstrap global.
 
-    The assignment is placed as early as possible (right after ``<head>``,
-    falling back to ``<html>``, then the top of the document) so it runs
-    before any module script. ``json.dumps`` keeps the value a safely quoted
-    JS string literal. ``Cache-Control: no-cache`` because the body no longer
-    matches the file on disk — a cached unprefixed shell must never be reused
-    under a prefixed deployment.
+    Two injections, placed immediately after ``<head>`` (falling back to
+    ``<html>``, then the top of the document) so they take effect before any
+    module script or asset reference:
+
+    * ``<base href="<prefix>/">`` — the Vite build uses ``base: "./"``, so
+      asset references are document-relative; on a deep SPA route
+      (``/p/projects/foo``) they would otherwise resolve to
+      ``/p/projects/assets/...`` and hit the SPA fallback instead of the
+      static file. The base element pins resolution to the prefix root.
+      Root-absolute URLs (``/api/...``) and full WebSocket URLs are
+      unaffected by ``<base>``, so the API/WS contract is unchanged.
+    * ``window.__SCISTUDIO_BASE_PATH__`` — the runtime prefix the frontend
+      base-path module reads (FR-003).
+
+    ``json.dumps`` keeps the JS value a safely quoted string literal;
+    ``html.escape`` does the same for the attribute context.
+    ``Cache-Control: no-cache`` because the body no longer matches the file
+    on disk — a cached unprefixed shell must never be reused under a
+    prefixed deployment.
     """
     html = Path(index_path).read_text(encoding="utf-8")
-    injection = f"<script>window.__SCISTUDIO_BASE_PATH__ = {json.dumps(base_path)};</script>"
+    base_href = escape(f"{base_path}/", quote=True)
+    injection = f'<base href="{base_href}"><script>window.__SCISTUDIO_BASE_PATH__ = {json.dumps(base_path)};</script>'
     for pattern in (_HEAD_OPEN, _HTML_OPEN):
         match = pattern.search(html)
         if match is not None:
