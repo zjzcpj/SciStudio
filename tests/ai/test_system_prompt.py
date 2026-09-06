@@ -233,3 +233,27 @@ def test_provisioned_claude_md_names_assistant_mio() -> None:
     template = files("scistudio").joinpath("agent_provisioning/templates/claude_agents_md.md")
     content = template.read_text(encoding="utf-8")
     assert "You are Mio" in content, "Mio identity missing from CLAUDE.md template"
+
+
+def test_tool_catalog_excludes_external_audience_tools(tmp_path: Path) -> None:
+    """ADR-055 Spec 1 (FR-004, PR #2275 review P2): the prompt catalogue must
+    match the socket transport's ``tools/list`` — external-audience-tagged
+    tools are webmcp-only and must not be advertised to local agents."""
+    from scistudio.ai.agent.mcp import AUDIENCE_EXTERNAL_TAG
+    from scistudio.ai.agent.mcp.server import mcp
+    from scistudio.ai.agent.system_prompt import compose_system_prompt
+
+    @mcp.tool(
+        name="prompt_audience_fixture_external",
+        tags={"category:qa", "read", AUDIENCE_EXTERNAL_TAG},
+    )
+    def _external() -> dict[str, bool]:
+        return {"ok": True}
+
+    try:
+        prompt = compose_system_prompt(tmp_path)
+        assert "prompt_audience_fixture_external" not in prompt
+        # Untagged tools are unaffected and stay listed.
+        assert "`search_docs`" in prompt
+    finally:
+        mcp.local_provider.remove_tool("prompt_audience_fixture_external")

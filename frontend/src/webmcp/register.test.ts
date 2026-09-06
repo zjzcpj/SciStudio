@@ -14,6 +14,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ProjectResponse } from "../types/api";
 import type { ModelContext, ToolDefinition } from "./types";
 
 const { apiFetchMock, loggerMock } = vi.hoisted(() => ({
@@ -33,7 +34,11 @@ vi.mock("../lib/api/core", () => ({
 
 vi.mock("../lib/logger", () => ({ logger: loggerMock }));
 
-import { registerSciStudioTools, registerSciStudioToolsWithRetry } from "./register";
+import {
+  registerSciStudioTools,
+  registerSciStudioToolsWithRetry,
+  subscribeToProjectChanges,
+} from "./register";
 
 interface FakeHost extends ModelContext {
   tools: Map<string, ToolDefinition>;
@@ -218,5 +223,68 @@ describe("registerSciStudioToolsWithRetry", () => {
     expect(count).toBe(0);
     expect(apiFetchMock).not.toHaveBeenCalled();
     expect(loggerMock.error).not.toHaveBeenCalled();
+  });
+});
+
+function fakeProject(id: string): ProjectResponse {
+  return {
+    id,
+    name: id,
+    description: "",
+    path: `/tmp/${id}`,
+    workflow_count: 0,
+    workflows: [],
+    current_workflow_id: null,
+  };
+}
+
+describe("subscribeToProjectChanges (PR #2275 review P1)", () => {
+  it("re-registers with a fresh project snapshot when the active project changes", async () => {
+    const host = fakeHost();
+    document.modelContext = host;
+    // Boot registration happens before any project is open: snapshot is null.
+    apiFetchMock.mockResolvedValueOnce(catalogue(["alpha"], null));
+    expect(await registerSciStudioTools()).toBe(1);
+
+    const { useAppStore } = await import("../store");
+    useAppStore.getState().setCurrentProject(null);
+    const unsubscribe = subscribeToProjectChanges();
+    try {
+      // User opens a project: the store change triggers a re-registration
+      // whose catalogue fetch carries the new snapshot.
+      apiFetchMock.mockResolvedValueOnce(catalogue(["alpha"], "project-9"));
+      useAppStore.getState().setCurrentProject(fakeProject("project-9"));
+      await vi.waitFor(() => {
+        expect(host.registerTool).toHaveBeenCalledTimes(2);
+      });
+
+      // The refreshed execute closure posts the new projectId, so mutation
+      // calls are not stuck at the stale boot-time snapshot.
+      apiFetchMock.mockResolvedValueOnce({ content: [{ type: "text", text: "ok" }] });
+      await host.tools.get("alpha")!.execute({});
+      const [, init] = apiFetchMock.mock.calls[2];
+      expect(JSON.parse(init.body as string).projectId).toBe("project-9");
+    } finally {
+      unsubscribe();
+      useAppStore.getState().setCurrentProject(null);
+    }
+  });
+
+  it("ignores unchanged project ids and does nothing without a host capability", async () => {
+    const { useAppStore } = await import("../store");
+    useAppStore.getState().setCurrentProject(null);
+    const unsubscribe = subscribeToProjectChanges();
+    try {
+      // No host capability (beforeEach cleared both surfaces): a project
+      // change must not fetch or register anything.
+      useAppStore.getState().setCurrentProject(fakeProject("project-7"));
+      // Same id again: no change, no trigger.
+      useAppStore.getState().setCurrentProject(fakeProject("project-7"));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(apiFetchMock).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+      useAppStore.getState().setCurrentProject(null);
+    }
   });
 });

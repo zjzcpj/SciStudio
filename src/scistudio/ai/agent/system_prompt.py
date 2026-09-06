@@ -147,7 +147,7 @@ def _render_tool_catalog() -> str:
     # The package __init__ does this, but compose can be invoked before
     # any other module has touched scistudio.ai.agent.mcp.
     import scistudio.ai.agent.mcp  # noqa: F401  # side-effect: register tools
-    from scistudio.ai.agent.mcp.server import mcp
+    from scistudio.ai.agent.mcp.server import AUDIENCE_EXTERNAL_TAG, mcp, tool_category_and_mutation
 
     try:
         loop = asyncio.get_running_loop()
@@ -181,11 +181,13 @@ def _render_tool_catalog() -> str:
 
     for tool in tools:
         tags = set(tool.tags or set())
-        category = next(
-            (t.split(":", 1)[1] for t in tags if t.startswith("category:")),
-            "uncategorised",
-        )
-        mutation = "write" if "write" in tags else "read"
+        if AUDIENCE_EXTERNAL_TAG in tags:
+            # ADR-055 Spec 1 (FR-004): external-audience tools are filtered
+            # out of the local socket transport's tools/list; the prompt
+            # catalogue must match what the local agent can actually call,
+            # or it would be told to use tools absent from its transport.
+            continue
+        category, mutation = tool_category_and_mutation(tags)
         description = (tool.description or "").strip().split("\n", 1)[0]
         line = f"- `{tool.name}` [{mutation}] — {description}"
         grouped.setdefault(category, []).append(line)

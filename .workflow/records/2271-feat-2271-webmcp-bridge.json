@@ -2484,6 +2484,18 @@
       "at": "2026-09-06T12:02:30.333951Z",
       "pattern": "docs/audit/2026-09-06-adr-055-spec1-with-context.md",
       "reason": "Integrate with-context audit report into final PR evidence path (dispatch rule)"
+    },
+    {
+      "action": "add-include",
+      "at": "2026-09-06T23:01:16.523155Z",
+      "pattern": "src/scistudio/ai/agent/system_prompt.py",
+      "reason": "Codex P1+P2+CodeQL review fixes on PR #2275: P1 wires registration refresh to project changes (frontend store subscription in register.ts, in-scope files only); P2 applies the audience filter to the local-agent prompt catalogue (system_prompt.py, outside original write set); CodeQL bounds the bridge exception mapping. No deferrals (owner directive)."
+    },
+    {
+      "action": "add-include",
+      "at": "2026-09-06T23:01:16.523180Z",
+      "pattern": "tests/ai/test_system_prompt.py",
+      "reason": "Codex P1+P2+CodeQL review fixes on PR #2275: P1 wires registration refresh to project changes (frontend store subscription in register.ts, in-scope files only); P2 applies the audience filter to the local-agent prompt catalogue (system_prompt.py, outside original write set); CodeQL bounds the bridge exception mapping. No deferrals (owner directive)."
     }
   ],
   "session_id": "0280f773-8d0b-4cf2-bd60-064aa5c33dc8",
@@ -2519,6 +2531,14 @@
       "class": null,
       "kind": "path",
       "path": "tests/api/test_root_path.py",
+      "rationale": null,
+      "verified_in_diff": null
+    },
+    {
+      "at": "2026-09-06T23:01:16.523188Z",
+      "class": null,
+      "kind": "path",
+      "path": "tests/ai/test_system_prompt.py",
       "rationale": null,
       "verified_in_diff": null
     }

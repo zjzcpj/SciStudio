@@ -54,11 +54,16 @@ def fixture_tools() -> Iterator[dict[str, list[str]]]:
         calls["read"].append("called")
         return {"ok": True}
 
+    @mcp.tool(name="webmcp_fixture_raise", tags={"category:testing", "read"})
+    def _fixture_raise() -> dict[str, Any]:
+        raise RuntimeError("SECRET-DETAIL-9f2b /abs/internal/path must not cross the wire")
+
     try:
         yield calls
     finally:
         mcp.local_provider.remove_tool("webmcp_fixture_write")
         mcp.local_provider.remove_tool("webmcp_fixture_read")
+        mcp.local_provider.remove_tool("webmcp_fixture_raise")
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +268,29 @@ def test_thrown_exception_maps_to_iserror_not_5xx(client: TestClient, opened_pro
     body = response.json()
     assert body["isError"] is True
     assert body["content"][0]["type"] == "text"
+
+
+def test_exception_mapping_is_bounded_no_internals_exposed(
+    client: TestClient, opened_project: Path, fixture_tools: dict[str, list[str]]
+) -> None:
+    """CodeQL py/stack-trace-exposure (PR #2275 review): the exception mapping
+    carries the exception TYPE name and a generic message only — never the
+    exception message, which can embed argument values, paths, or internals."""
+    response = client.post(
+        "/api/webmcp/call",
+        headers=_token_headers(client),
+        json={"name": "webmcp_fixture_raise", "arguments": {}},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["isError"] is True
+    assert len(body["content"]) == 1
+    text = body["content"][0]["text"]
+    # Bounded type name only: FastMCP wraps tool exceptions in ToolError.
+    assert "ToolError" in text or "RuntimeError" in text
+    assert "SECRET-DETAIL-9f2b" not in text
+    assert "/abs/internal/path" not in text
+    assert "Traceback" not in text
 
 
 # ---------------------------------------------------------------------------

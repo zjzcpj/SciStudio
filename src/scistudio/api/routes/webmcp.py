@@ -264,15 +264,27 @@ async def call_webmcp_tool(request: Request, body: ToolCallRequest) -> dict[str,
     except Exception as exc:
         # Surfaced to the agent as isError content rather than as a 500
         # (FR-003): a failed tool call is information it can act on, and an
-        # HTTP error would reach it as a dead end. FR-007: the log records
-        # the exception TYPE only — a message can embed argument values.
+        # HTTP error would reach it as a dead end. The detail is BOUNDED to
+        # the exception type name (CodeQL py/stack-trace-exposure / PR #2275
+        # review): the message can embed argument values, absolute paths, or
+        # internals, which must not cross the wire to an external caller —
+        # and must not be logged either (FR-007: type only).
         logger.warning(
             "webmcp call failed: tool=%s outcome=isError error_type=%s",
             body.name,
             type(exc).__name__,
         )
         return {
-            "content": [{"type": "text", "text": f"{type(exc).__name__}: {exc}"}],
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        f"{type(exc).__name__}: tool call failed; "
+                        "detail withheld by the webmcp bridge (check arguments "
+                        "and retry, or inspect the local server logs)"
+                    ),
+                }
+            ],
             "isError": True,
         }
 

@@ -30,6 +30,7 @@
 
 import { apiFetch, webmcpSessionHeaders } from "../lib/api/core";
 import { logger } from "../lib/logger";
+import { useAppStore } from "../store";
 
 import type { ModelContext, ToolResult } from "./types";
 
@@ -184,6 +185,37 @@ export async function registerSciStudioTools(): Promise<number> {
 
   logger.info(`WebMCP: registered ${registered}/${catalogue.tools.length} tools`);
   return registered;
+}
+
+/**
+ * Re-register when the active project changes (PR #2275 review P1).
+ *
+ * The `execute` closures capture the catalogue's project snapshot, so a
+ * boot-time registration made before any project is open would post
+ * `projectId: null` forever — and every mutation call would be rejected as
+ * `stale_project_context` once a project is open. Subscribing to the
+ * project store re-runs `registerSciStudioTools` on open/create/switch/
+ * close; the FR-009 lifecycle guarantees hold because re-registration
+ * aborts the superseded attempt (which then never reports success) and
+ * fetches a fresh catalogue snapshot.
+ *
+ * Returns the unsubscribe function. Fire-and-forget by design: the
+ * subscription itself never blocks app boot (FR-010).
+ */
+export function subscribeToProjectChanges(): () => void {
+  let lastProjectId = useAppStore.getState().currentProject?.id ?? null;
+  return useAppStore.subscribe((state) => {
+    const projectId = state.currentProject?.id ?? null;
+    if (projectId === lastProjectId) {
+      return;
+    }
+    lastProjectId = projectId;
+    if (!probeModelContext()) {
+      // No host capability: nothing is registered, so nothing to refresh.
+      return;
+    }
+    void registerSciStudioTools();
+  });
 }
 
 export interface RegisterRetryOptions {
