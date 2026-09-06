@@ -1,0 +1,77 @@
+{
+  "base_ref": "origin/feat/2271-webmcp-bridge",
+  "branch": "audit/2271-spec1-with-context",
+  "check_events": [],
+  "check_na": [
+    {
+      "name": "frontend",
+      "rationale": "no frontend files touched by this audit"
+    }
+  ],
+  "commit": null,
+  "declared_scope": {
+    "exclude": [],
+    "include": [
+      "docs/audit/2026-09-06-adr-055-spec1-with-context.md"
+    ]
+  },
+  "directive_events": [],
+  "docs_events": [
+    {
+      "at": "2026-09-06T11:43:49.816182Z",
+      "class": null,
+      "kind": "path",
+      "path": "docs/audit/2026-09-06-adr-055-spec1-with-context.md",
+      "rationale": null,
+      "verified_in_diff": null
+    }
+  ],
+  "governance_touch": false,
+  "guard_events": [],
+  "issues": [
+    {
+      "close_in_pr": true,
+      "followup_rationale": null,
+      "number": 2271,
+      "url": null
+    }
+  ],
+  "observed_admin_labels": [],
+  "observed_diff": null,
+  "owner_directive": "With-context audit of PR #2275 (ADR-055 Spec 1 WebMCP bridge) before merge; write audit report only, no feature code. Sentrux MCP unavailable in this runtime (recorded per dispatch).",
+  "persona": "audit_reviewer",
+  "pull_request": null,
+  "reconcile_events": [],
+  "record_id": "2271-audit-2271-spec1-with-context",
+  "requested_admin_labels": [],
+  "required_obligations": {
+    "admin_labels": [],
+    "checks": [],
+    "docs": [],
+    "guards": [],
+    "tests": []
+  },
+  "runtime": "agents:kimi-k2",
+  "schema_version": 2,
+  "scope_events": [
+    {
+      "action": "add-include",
+      "at": "2026-09-06T11:43:49.816154Z",
+      "pattern": ".workflow/records/",
+      "reason": "plan"
+    }
+  ],
+  "session_id": "9effff7b-46da-4189-969d-be555a32bb01",
+  "strictness_tier": null,
+  "task_kind": "maintenance",
+  "test_events": [
+    {
+      "at": "2026-09-06T11:43:49.816194Z",
+      "class": "audit-only",
+      "kind": "na",
+      "path": null,
+      "rationale": "audit produces a report, not code; no behavior change to test",
+      "verified_in_diff": null
+    }
+  ]
+}

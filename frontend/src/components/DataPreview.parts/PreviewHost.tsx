@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "../../lib/api";
+import { apiUrl } from "../../lib/api/base-path";
 import type {
   PreviewEnvelope,
   PreviewResource,
@@ -392,8 +393,12 @@ export function PreviewHost({
           return currentEnvelope().resources;
         },
       },
+      // ADR-055 Spec 0: asset URLs handed to previewer modules carry the
+      // configured mount prefix via the shared base-path helper.
       assetUrl: (assetPath: string) =>
-        `/api/previews/assets/${encodeURIComponent(currentEnvelope().previewer_id)}/${assetPath.replace(/^\/+/, "")}`,
+        apiUrl(
+          `/api/previews/assets/${encodeURIComponent(currentEnvelope().previewer_id)}/${assetPath.replace(/^\/+/, "")}`,
+        ),
       exportArtifact: async (request) => {
         const current = currentEnvelope();
         const resourceId = request?.resourceId ?? "export";
@@ -574,9 +579,13 @@ function buildPreviewResourceUrl(
   resourceId: string,
   params?: Record<string, unknown>,
 ): string {
-  const base = `/api/previews/sessions/${encodeURIComponent(sessionId)}/resources/${encodeURIComponent(
-    resourceId,
-  )}`;
+  // ADR-055 Spec 0: the URL carries the configured mount prefix via apiUrl
+  // (idempotent under the default root mount).
+  const base = apiUrl(
+    `/api/previews/sessions/${encodeURIComponent(sessionId)}/resources/${encodeURIComponent(
+      resourceId,
+    )}`,
+  );
   if (!params || Object.keys(params).length === 0) return base;
   const encodedParams = JSON.stringify(params);
   if (encodedParams.length > RESOURCE_PARAMS_MAX_CHARS) {

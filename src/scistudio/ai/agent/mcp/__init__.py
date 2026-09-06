@@ -37,6 +37,14 @@ catalogue call ``await mcp.list_tools()`` directly (see
 :mod:`scistudio.ai.agent.system_prompt` for the rendering side).
 
 See ``docs/adr/ADR-040.md`` §3.1-§3.3 for the full migration design.
+
+ADR-055 Spec 1 (FR-004) adds the audience-tag surface:
+:data:`AUDIENCE_EXTERNAL_TAG` marks a tool as external-audience only — the
+WebMCP HTTP bridge catalogue includes it, the local socket transport's
+``tools/list`` filters it out, and untagged tools stay visible on both.
+The constant is defined in :mod:`scistudio.ai.agent.mcp.server` (the module
+that owns the registry) and re-exported here so tool modules can import it
+from the package root.
 """
 
 from __future__ import annotations
@@ -52,6 +60,6 @@ from scistudio.ai.agent.mcp import (  # noqa: F401
     tools_qa,
     tools_workflow,
 )
-from scistudio.ai.agent.mcp.server import MCPServer, mcp
+from scistudio.ai.agent.mcp.server import AUDIENCE_EXTERNAL_TAG, MCPServer, mcp
 
-__all__ = ["MCPServer", "mcp"]
+__all__ = ["AUDIENCE_EXTERNAL_TAG", "MCPServer", "mcp"]

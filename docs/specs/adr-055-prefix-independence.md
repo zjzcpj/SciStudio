@@ -47,13 +47,13 @@ governs:
     - frontend/src/lib/logger.ts
     - frontend/src/App.parts/InteractiveModals.parts/panelModuleLoader.ts
     - frontend/src/components/DataPreview.parts/dynamicPreviewer.ts
+    - frontend/src/lib/api/base-path.ts
   excludes: []
 planned_governs:
   modules: []
   contracts: []
   entry_points: []
-  files:
-    - frontend/src/lib/api/base-path.ts
+  files: []
   excludes: []
 tests:
   - tests/api/test_root_path.py

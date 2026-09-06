@@ -34,7 +34,9 @@ import logging
 import os
 import sys
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 from fastmcp import FastMCP
 
@@ -52,6 +54,35 @@ logger = logging.getLogger(__name__)
 
 mcp: FastMCP = FastMCP(name="scistudio-mcp", version="0.1.0")
 """Module-scope FastMCP instance (ADR-040 §3.1)."""
+
+
+AUDIENCE_EXTERNAL_TAG = "audience:external"
+"""ADR-055 Spec 1 (FR-004): tag marking a tool as external-audience only.
+
+A tool registered with this tag appears in the WebMCP HTTP bridge catalogue
+(:mod:`scistudio.api.routes.webmcp`) but is filtered out of the local socket
+transport's ``tools/list`` — local agents already have native file/shell
+capability and must not pay for external-only tools. Visibility defaults to
+both transports; the filter is opt-in per tool tag.
+"""
+
+
+def tool_category_and_mutation(tags: Iterable[str] | None) -> tuple[str, str]:
+    """Derive the ``(category, mutation)`` pair from a tool's tag set.
+
+    Single derivation point shared by the socket transport's ``tools/list``
+    ``_meta`` block and the webmcp bridge catalogue so the two surfaces
+    cannot drift. ``mutation`` is ``"write"`` when the tag set carries the
+    ``write`` tag, else ``"read"``; ``category`` comes from the first
+    ``category:*`` tag, else ``"uncategorised"``.
+    """
+    tag_set = set(tags or ())
+    category = next(
+        (t.split(":", 1)[1] for t in tag_set if t.startswith("category:")),
+        "uncategorised",
+    )
+    mutation = "write" if "write" in tag_set else "read"
+    return category, mutation
 
 
 # JSON-RPC 2.0 error codes preserved for the line-delimited transport
@@ -339,11 +370,13 @@ class MCPServer:
                 tools = []
                 for entry in fastmcp_tools:
                     tags = set(entry.tags or set())
-                    category = next(
-                        (t.split(":", 1)[1] for t in tags if t.startswith("category:")),
-                        "uncategorised",
-                    )
-                    mutation = "write" if "write" in tags else "read"
+                    if AUDIENCE_EXTERNAL_TAG in tags:
+                        # ADR-055 Spec 1 (FR-004): external-audience tools are
+                        # served by the WebMCP HTTP bridge catalogue only; the
+                        # local socket transport filters them out. Untagged
+                        # tools stay visible on both transports.
+                        continue
+                    category, mutation = tool_category_and_mutation(tags)
                     tools.append(
                         {
                             "name": entry.name,
@@ -372,7 +405,7 @@ class MCPServer:
                         _INVALID_PARAMS,
                         f"call_tool failed for {name}: {type(exc).__name__}: {exc}",
                     )
-                content_text = json.dumps(_serialise_result(result), default=str)
+                content_text = json.dumps(serialise_result(result), default=str)
                 return _ok(
                     req_id,
                     {"content": [{"type": "text", "text": content_text}]},
@@ -417,8 +450,15 @@ def _unlink_if_present(path: Path) -> None:
             os.unlink(path)
 
 
-def _serialise_result(result: object) -> object:
+def serialise_result(result: object) -> object:
     """Coerce a FastMCP ToolResult-like object to a JSON-friendly value.
+
+    Promoted from ``_serialise_result`` to the shared, importable adapter
+    contract by ADR-055 Spec 1 (FR-002): the local socket transport (below)
+    and the WebMCP HTTP bridge
+    (:func:`adapt_tool_result`, used by
+    :mod:`scistudio.api.routes.webmcp`) both normalise results through this
+    module so the two transports cannot drift.
 
     FastMCP's ``call_tool`` returns either a ``ToolResult`` (with
     ``structured_content``) or already-coerced primitives depending on
@@ -444,4 +484,69 @@ def _serialise_result(result: object) -> object:
     return result
 
 
-__all__ = ["MCPServer", "mcp"]
+def adapt_tool_result(result: object) -> dict[str, Any]:
+    """Map a FastMCP tool result to the WebMCP bridge response shape.
+
+    ADR-055 Spec 1 (FR-003) — the explicit adapter contract the demo's
+    text-only mapping violated. Declared mappings:
+
+    * **structured content** — ``result.structured_content`` is preserved
+      verbatim in the top-level ``structuredContent`` field; there is no
+      lossy JSON text round-trip.
+    * **text content blocks** — passed through unchanged as
+      ``{"type": "text", "text": ...}``.
+    * **non-text content blocks** — the WebMCP host API consumes text
+      content only, so each non-text block (image, audio, embedded
+      resource, ...) is replaced by an explicitly marked substitution:
+      a text block whose text names the dropped representation and which
+      carries ``"substitutedFrom": <original block type>``.
+    * **top-level error flag** — propagated from the result's ``isError``
+      (or ``is_error``) attribute into the top-level ``isError`` field;
+      absent means ``False``. Thrown exceptions never reach this function:
+      the router maps them to ``isError`` content itself (FR-003), so a
+      failed tool call is information the agent can act on rather than an
+      HTTP 5xx.
+    * **primitive results** (neither ``content`` nor
+      ``structured_content``) — normalised through
+      :func:`serialise_result` and wrapped in a single text block.
+    """
+    structured = getattr(result, "structured_content", None)
+    content = getattr(result, "content", None)
+    is_error = bool(getattr(result, "isError", getattr(result, "is_error", False)))
+
+    blocks: list[dict[str, Any]] = []
+    if content:
+        for block in content:
+            block_type = getattr(block, "type", None)
+            text = getattr(block, "text", None)
+            if block_type == "text" and text is not None:
+                blocks.append({"type": "text", "text": text})
+                continue
+            declared_type = str(block_type if block_type is not None else type(block).__name__)
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f"[webmcp bridge: a content block of type '{declared_type}' is not "
+                        "representable for the host and was substituted with this notice]"
+                    ),
+                    "substitutedFrom": declared_type,
+                }
+            )
+    elif structured is None:
+        blocks.append({"type": "text", "text": json.dumps(serialise_result(result), default=str)})
+
+    response: dict[str, Any] = {"content": blocks, "isError": is_error}
+    if structured is not None:
+        response["structuredContent"] = structured
+    return response
+
+
+__all__ = [
+    "AUDIENCE_EXTERNAL_TAG",
+    "MCPServer",
+    "adapt_tool_result",
+    "mcp",
+    "serialise_result",
+    "tool_category_and_mutation",
+]

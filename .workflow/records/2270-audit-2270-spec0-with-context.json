@@ -1,0 +1,72 @@
+{
+  "base_ref": null,
+  "branch": "audit/2270-spec0-with-context",
+  "check_events": [],
+  "check_na": [],
+  "commit": null,
+  "declared_scope": {
+    "exclude": [],
+    "include": [
+      "docs/audit/2026-09-06-adr-055-spec0-with-context.md"
+    ]
+  },
+  "directive_events": [],
+  "docs_events": [
+    {
+      "at": "2026-09-06T11:35:20.453378Z",
+      "class": "audit-report-only",
+      "kind": "na",
+      "path": null,
+      "rationale": "the audit report under docs/audit/ is the documentation deliverable",
+      "verified_in_diff": null
+    }
+  ],
+  "governance_touch": false,
+  "guard_events": [],
+  "issues": [
+    {
+      "close_in_pr": true,
+      "followup_rationale": null,
+      "number": 2270,
+      "url": null
+    }
+  ],
+  "observed_admin_labels": [],
+  "observed_diff": null,
+  "owner_directive": "Verify the ADR-055 Spec 0 implementation PR #2274 before merge (with-context audit of issue #2270)",
+  "persona": "audit_reviewer",
+  "pull_request": null,
+  "reconcile_events": [],
+  "record_id": "2270-audit-2270-spec0-with-context",
+  "requested_admin_labels": [],
+  "required_obligations": {
+    "admin_labels": [],
+    "checks": [],
+    "docs": [],
+    "guards": [],
+    "tests": []
+  },
+  "runtime": "agents:kimi-k2",
+  "schema_version": 2,
+  "scope_events": [
+    {
+      "action": "add-include",
+      "at": "2026-09-06T11:35:20.453347Z",
+      "pattern": "docs/audit/2026-09-06-adr-055-spec0-with-context.md",
+      "reason": "plan"
+    }
+  ],
+  "session_id": "1944caf4-d8b5-4835-90b0-e2ecbbf302ec",
+  "strictness_tier": null,
+  "task_kind": "maintenance",
+  "test_events": [
+    {
+      "at": "2026-09-06T11:35:20.453387Z",
+      "class": "audit-report-only",
+      "kind": "na",
+      "path": null,
+      "rationale": "no production code change; evidence is the audit report itself plus referenced re-run commands",
+      "verified_in_diff": null
+    }
+  ]
+}

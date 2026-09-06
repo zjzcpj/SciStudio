@@ -23,6 +23,7 @@ import type {
   RestorePreflight,
 } from "../../types/lineage";
 import { apiFetch, ApiError } from "./core";
+import { apiUrl } from "./base-path";
 
 // ---------------------------------------------------------------------------
 // Lineage response adapters
@@ -221,7 +222,9 @@ export const lineageApi = {
      * decoder.
      */
     getRunMethods: async (runId: string): Promise<LineageMethodsResponse> => {
-      const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/methods`);
+      // Raw fetch (text/markdown, not apiFetch's JSON decoder), but the URL
+      // still goes through the base-path source of truth (ADR-055 Spec 0).
+      const response = await fetch(apiUrl(`/api/runs/${encodeURIComponent(runId)}/methods`));
       if (!response.ok) {
         const payload = (await response.json().catch(() => ({ detail: response.statusText }))) as {
           detail?: string;

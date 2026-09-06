@@ -33,6 +33,8 @@
 import { Bot } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { apiFetch } from "../../lib/api/core";
+
 export const PROVIDER_INTRO_TITLE = "Meet the real agents";
 
 export const PROVIDER_INTRO_BODY =
@@ -107,9 +109,9 @@ export function ProviderIntro({ onContinue, onOpenInstallGuide }: ProviderIntroP
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch("/api/ai/status");
-        if (!response.ok) throw new Error(String(response.status));
-        const body = (await response.json()) as { providers: ProviderStatusRow[] };
+        // apiFetch routes through the base-path helper (ADR-055 Spec 0 FR-004)
+        // and throws ApiError for non-2xx.
+        const body = await apiFetch<{ providers: ProviderStatusRow[] }>("/api/ai/status");
         if (!cancelled) setProviders(body.providers);
       } catch {
         // The card still works: the line plus a pointer at the surface that

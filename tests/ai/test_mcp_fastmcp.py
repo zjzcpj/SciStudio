@@ -538,3 +538,66 @@ def test_dispatch_silently_drops_notifications(tmp_path: Path) -> None:
     resp = _run(server.dispatch({"jsonrpc": "2.0", "id": 7, "method": "totally/unknown"}))
     assert resp is not None
     assert resp.get("error", {}).get("code") == -32601
+
+
+# ---------------------------------------------------------------------------
+# ADR-055 Spec 1 (FR-004 / US6): audience-tag per-transport visibility.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def audience_fixture_tools() -> Iterator[None]:
+    """Register an external-tagged and an untagged fixture tool, then clean up.
+
+    The registry must return to its 36-tool baseline afterwards — the parity
+    tests above assert the exact count.
+    """
+    from scistudio.ai.agent.mcp import AUDIENCE_EXTERNAL_TAG
+
+    @mcp.tool(
+        name="audience_fixture_external",
+        tags={"category:testing", "read", AUDIENCE_EXTERNAL_TAG},
+    )
+    def _external() -> dict[str, Any]:
+        return {"ok": True}
+
+    @mcp.tool(name="audience_fixture_untagged", tags={"category:testing", "read"})
+    def _untagged() -> dict[str, Any]:
+        return {"ok": True}
+
+    try:
+        yield
+    finally:
+        mcp.local_provider.remove_tool("audience_fixture_external")
+        mcp.local_provider.remove_tool("audience_fixture_untagged")
+
+
+def test_audience_external_tag_is_defined_once() -> None:
+    """FR-004: one constant, importable from the package root and server module."""
+    import scistudio.ai.agent.mcp as mcp_package
+    from scistudio.ai.agent.mcp import server as server_module
+
+    assert mcp_package.AUDIENCE_EXTERNAL_TAG == server_module.AUDIENCE_EXTERNAL_TAG == "audience:external"
+
+
+def test_socket_tools_list_excludes_external_tagged(audience_fixture_tools: None, tmp_path: Path) -> None:
+    """US6 AS1 socket side: external-tagged absent, untagged present."""
+    from scistudio.ai.agent.mcp.server import MCPServer
+
+    server = MCPServer(socket_path=tmp_path / "mcp.sock", project_dir=tmp_path)
+    response = _run(server.dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}))
+    assert response is not None
+    names = {t["name"] for t in response["result"]["tools"]}
+    assert "audience_fixture_external" not in names
+    assert "audience_fixture_untagged" in names
+
+
+def test_webmcp_catalogue_includes_external_tagged(audience_fixture_tools: None) -> None:
+    """US6 AS1/AS2 bridge side: external-tagged AND untagged both present."""
+    from scistudio.api.routes.webmcp import build_catalogue
+
+    catalogue = _run(build_catalogue(None))
+    names = {t["name"] for t in catalogue["tools"]}
+    assert "audience_fixture_external" in names
+    assert "audience_fixture_untagged" in names
+    assert catalogue["context"] == {"projectId": None}

@@ -34,6 +34,7 @@ governs:
     - scistudio.ai.agent.mcp.server
     - scistudio.api.app
     - scistudio.api.spa
+    - scistudio.api.routes.webmcp
   contracts:
     - scistudio.ai.agent.mcp.server.mcp
   entry_points: []
@@ -43,17 +44,16 @@ governs:
     - src/scistudio/ai/agent/mcp/__init__.py
     - src/scistudio/api/app.py
     - src/scistudio/api/spa.py
+    - src/scistudio/api/routes/webmcp.py
     - frontend/src/main.tsx
     - frontend/src/lib/api/core.ts
+    - frontend/src/webmcp/**
   excludes: []
 planned_governs:
-  modules:
-    - scistudio.api.routes.webmcp
+  modules: []
   contracts: []
   entry_points: []
-  files:
-    - src/scistudio/api/routes/webmcp.py
-    - frontend/src/webmcp/**
+  files: []
   excludes: []
 tests:
   - tests/api/test_webmcp.py

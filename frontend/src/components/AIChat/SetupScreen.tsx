@@ -7,6 +7,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 
+import { apiFetch } from "../../lib/api/core";
 import { useAppStore } from "../../store";
 import { NoProvidersNotice } from "./SetupScreen.parts/NoProvidersNotice";
 import { PermissionModePicker } from "./SetupScreen.parts/PermissionModePicker";
@@ -43,9 +44,9 @@ async function fetchStatus(force = false): Promise<AiStatusResponse> {
   if (_statusInflight) return _statusInflight;
   _statusInflight = (async () => {
     try {
-      const r = await fetch("/api/ai/status");
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const data = (await r.json()) as AiStatusResponse;
+      // apiFetch routes through the base-path helper (ADR-055 Spec 0 FR-004)
+      // and throws ApiError for non-2xx, so no manual r.ok check is needed.
+      const data = await apiFetch<AiStatusResponse>("/api/ai/status");
       _statusCache = { at: Date.now(), data };
       return data;
     } finally {
