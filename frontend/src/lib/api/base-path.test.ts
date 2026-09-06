@@ -82,6 +82,16 @@ describe("apiUrl", () => {
     expect(apiUrl(apiUrl("/api/version"))).toBe("/p/api/version");
   });
 
+  it("does not mistake a near-colliding route for an already-prefixed path", () => {
+    // The exact-boundary check (base + "/") must not misfire when the prefix
+    // is a strict prefix-string of the route namespace. (A true collision
+    // like base="/api" is rejected at configuration time by the backend's
+    // normalize_root_path — that case can never reach this helper.)
+    setBasePath("/ap");
+    expect(apiUrl("/api/version")).toBe("/ap/api/version");
+    expect(apiUrl("/ap/api/version")).toBe("/ap/api/version");
+  });
+
   it("preserves query strings", () => {
     setBasePath("/p");
     expect(apiUrl("/api/logs/stream?workflow_id=w&block_id=b")).toBe(

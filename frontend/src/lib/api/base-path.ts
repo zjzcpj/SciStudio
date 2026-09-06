@@ -61,7 +61,14 @@ export function resetBasePathCacheForTests(): void {
   cachedBasePath = null;
 }
 
-/** Join base + path with exactly one separating slash; idempotent. */
+/** Join base + path with exactly one separating slash; idempotent.
+ *
+ * The "already prefixed" check is an exact boundary match (`=== base` or
+ * `base + "/"`), and it is unambiguous because the backend rejects prefixes
+ * whose first segment collides with the `/api`/`/ws` route namespaces at
+ * configuration time (`normalize_root_path` in `api/app.py`): with a legal
+ * prefix like `/p`, no API route path (`/api/...`, `/ws`) can start with
+ * `/p/`, so a match can only mean the prefix was already applied. */
 function joinBasePath(base: string, path: string): string {
   if (!base) return path;
   if (!path) return base;

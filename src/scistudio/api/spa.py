@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from html import escape
 from pathlib import Path
 from typing import cast
 
@@ -87,27 +88,44 @@ class SPAStaticFiles(StaticFiles):
 
 
 def _templated_index_response(index_path: str, base_path: str, webmcp_session_token: str = "") -> Response:
-    """Serve ``index.html`` with the runtime bootstrap globals injected.
+    """Serve ``index.html`` with the runtime bootstrap injected.
 
-    Emits ``window.__SCISTUDIO_BASE_PATH__`` when a mount prefix is
-    configured (Spec 0 FR-003) and ``window.__SCISTUDIO_WEBMCP_TOKEN__``
-    when a bridge session token is configured (Spec 1 FR-006).
+    Three injections, placed immediately after ``<head>`` (falling back to
+    ``<html>``, then the top of the document) so they take effect before any
+    module script or asset reference:
 
-    The assignment is placed as early as possible (right after ``<head>``,
-    falling back to ``<html>``, then the top of the document) so it runs
-    before any module script. ``json.dumps`` keeps each value a safely quoted
-    JS string literal. ``Cache-Control: no-cache`` because the body no longer
-    matches the file on disk — a cached unprefixed shell must never be reused
-    under a prefixed deployment, and a cached page must never carry a stale
-    session token.
+    * ``<base href="<prefix>/">`` (only when a prefix is configured) — the
+      Vite build uses ``base: "./"``, so asset references are
+      document-relative; on a deep SPA route (``/p/projects/foo``) they would
+      otherwise resolve to ``/p/projects/assets/...`` and hit the SPA
+      fallback instead of the static file. The base element pins resolution
+      to the prefix root. Root-absolute URLs (``/api/...``) and full
+      WebSocket URLs are unaffected by ``<base>``, so the API/WS contract is
+      unchanged. The empty prefix emits no ``<base>`` (Spec 0 FR-002).
+    * ``window.__SCISTUDIO_BASE_PATH__`` (only when a prefix is configured) —
+      the runtime prefix the frontend base-path module reads (Spec 0 FR-003).
+    * ``window.__SCISTUDIO_WEBMCP_TOKEN__`` (when a bridge session token is
+      configured) — the per-launch WebMCP bridge session token, injected on
+      every mount including the default root mount (Spec 1 FR-006).
+
+    ``json.dumps`` keeps each JS value a safely quoted string literal;
+    ``html.escape`` does the same for the attribute context.
+    ``Cache-Control: no-cache`` because the body no longer matches the file
+    on disk — a cached unprefixed shell must never be reused under a
+    prefixed deployment, and a cached page must never carry a stale session
+    token.
     """
     html = Path(index_path).read_text(encoding="utf-8")
+    injection = ""
+    if base_path:
+        base_href = escape(f"{base_path}/", quote=True)
+        injection += f'<base href="{base_href}">'
     assignments = ""
     if base_path:
         assignments += f"window.__SCISTUDIO_BASE_PATH__ = {json.dumps(base_path)};"
     if webmcp_session_token:
         assignments += f"window.__SCISTUDIO_WEBMCP_TOKEN__ = {json.dumps(webmcp_session_token)};"
-    injection = f"<script>{assignments}</script>"
+    injection += f"<script>{assignments}</script>"
     for pattern in (_HEAD_OPEN, _HTML_OPEN):
         match = pattern.search(html)
         if match is not None:
