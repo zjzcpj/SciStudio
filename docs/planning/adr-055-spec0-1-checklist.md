@@ -233,7 +233,7 @@ language_source: en
 | Gate ledger check (pre-PR) | `gate_record check --mode pre-pr --pr-body-file .workflow/local/pr-body.md` | `[x]` | reconciliation passed on all three branches (umbrella, feat/2270, feat/2271) |
 | Gate finalize (pre-PR) | `gate_record finalize --closes "#2270"` / `"#2271"` / `"#2272"` | `[x]` | recorded in each ledger; post-PR finalize recorded PR provenance (#2273/#2274/#2275) |
 | Wrapper preflight | `python scripts/scistudio_pr_create.py` | `[x]` | pre-flight clean on all three PRs; PRs opened via the wrapper |
-| CI | GitHub Actions | `[x]` | PR #2274 @ `47925cde9`: 16/16 pass. PR #2275 @ `6d42b54d2`: 16/16 pass |
+| CI | GitHub Actions | `[x]` | PR #2274 @ `774e35620` (post-Codex-fixes): 16/16 pass. PR #2275 @ `e817f9b82` (post-Codex-fixes + final base merge): 16/16 pass |
 | Live host evidence | CDP probe + HTTP probes on `scistudio serve` | `[x]` | PR #2275 comment: Chrome 152 stable, modelContext absent (trial-gated), token injection + graceful degradation + 36-tool catalogue + 409 binding verified live |
 
 ## 10. Drift Log
@@ -242,7 +242,7 @@ Append only.
 
 | Date | Agent | Drift | Action | Follow-up |
 |---|---|---|---|---|
-| 2026-09-06 | codex-review | PR #2274: 4 findings (2xP1: prefixed deep-SPA asset resolution, worker callback host vs bind host; 2xP2: /api prefix collision, doubled-separator routing). PR #2275: 3 findings (P1: re-register on project change; P2: audience filter also in local-agent prompt; CodeQL: exception info exposure) | A1/A2 re-dispatched to fix all seven with tests; no deferrals per owner | fixes land on the respective PR branches |
+| 2026-09-06 | codex-review | PR #2274: 4 findings (2xP1: prefixed deep-SPA asset resolution, worker callback host vs bind host; 2xP2: /api prefix collision, doubled-separator routing). PR #2275: 3 findings (P1: re-register on project change; P2: audience filter also in local-agent prompt; CodeQL: exception info exposure) | A1/A2 re-dispatched to fix all seven with tests; no deferrals per owner | all 7 fixed with tests; CI green again at final heads (#2274 `774e35620`, #2275 `e817f9b82`); review replies posted on both PRs |
 | 2026-09-06 | manager | Hook-install command resolved a relative gitdir and briefly wrote blocking hooks into the main repo `.git/hooks`; a local-only test commit landed in the demo clone | Restored main hooks to documented state (pre-push allow shim; no commit hooks per #2150); `reset --hard` the demo clone back to `cf0fe769` (no push, remote disabled); reinstalled blocking hooks with absolute paths and verified they fire | N/A |
 
 ## 11. Final Readiness
